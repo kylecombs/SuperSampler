@@ -498,6 +498,45 @@ SSampler {
 	}
 
 
+	//Direct-section voice trigger. Bypasses SamplerQuery.getSamplesByKeynum
+	//-- no key-range resolution, no closest-match fallback. The caller
+	//guarantees which (sample, section) plays. Useful for auditioning
+	//per-sample overrides where multiple sections share key ranges.
+	//
+	//Per-sample voice overrides (#setSampleVoiceArgs) still apply -- the
+	//override lookup keys on (sample, section), which is exactly what was
+	//passed here.
+	//
+	//If `note` is supplied, the voice is registered in #activeVoices so
+	//#noteOff (and the voice-cap policy) work the same way as for #noteOn.
+	playSectionVoice {arg sample, section = 0, keynum = nil, vel = 64, amp = nil,
+		dur = nil, pan = 0, out = this.class.defaultOutputBus,
+		midiChannel = 0, note = nil;
+		var resolvedAmp = amp ? (vel / 127);
+		var sectionKey  = sample.keynum[section];
+		//Default: play at the section's anchored pitch (rate == 1).
+		var triggerKey  = keynum ? sectionKey;
+		var keySign     = triggerKey.sign;
+		var args        = SamplerArguments.new;
+		var prep        = SamplerPrepare.new;
+
+		args.set(keynums: triggerKey, amp: resolvedAmp, dur: dur, pan: pan,
+			texture: 1, out: out, midiChannel: midiChannel, gate: 1, loop: 1);
+
+		prep.bufServer   = bufServer;
+		prep.sample      = sample;
+		prep.samplerName = this.name;
+		prep.duration    = args.dur;
+		prep.section     = section;
+		prep.setRate(2**((triggerKey.abs - sectionKey)/12) * (keySign + 1 - keySign.abs));
+		prep.buffer      = sample.activeBuffer[section];
+		prep.midiChannel = args.midiChannel;
+		args.setSamples([prep]);
+
+		^this.playVoiceArgs(args, note);
+	}
+
+
 	//==============================================================
 	// Per-sample voice-mode overrides
 	//==============================================================

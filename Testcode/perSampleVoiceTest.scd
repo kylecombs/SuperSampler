@@ -44,6 +44,8 @@ t.setSampleVoiceArgs(~s0, 0, (
 t.getSampleVoiceArgs(~s0, 0);
 
 // Trigger via noteOn -- per-sample overrides win over noteOn's arg defaults.
+// noteOn picks the (sample, section) with the closest anchored pitch, so
+// triggering at ~s0.keynum[0] reliably hits section 0 of ~s0.
 ~v = t.noteOn(~s0.keynum[0]);
 // HEAR: slow attack, loops the second half (xfade-style), then on note-off
 // the release region (last 30%) loops while the amp env releases over 1.5s.
@@ -53,6 +55,14 @@ t.getSampleVoiceArgs(~s0, 0);
 ~v = t.noteOn(~s0.keynum[0], loopMode: \trapezoid, attack: 0.001);
 // HEAR: SAME as the previous trigger -- attack still 0.1s, mode still xfade.
 ~v.do{|s| s.set(\gate, 0)};
+
+// Direct-section play: bypasses the key-range resolver entirely. Use this
+// when multiple sections share key ranges and you want unambiguous control
+// over which section sounds. Per-sample overrides still apply because the
+// lookup keys on (sample, section), which is exactly what you passed.
+~v = t.playSectionVoice(~s0, 0, note: ~s0.keynum[0]);
+// HEAR: same overrides as the noteOn trigger above, but unambiguous.
+t.noteOff(~s0.keynum[0]);
 
 // Partial update: merge in a new attack. Other override fields persist.
 t.setSampleVoiceArgs(~s0, 0, (attack: 0.5));

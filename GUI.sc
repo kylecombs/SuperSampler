@@ -612,15 +612,18 @@
 		.minDecimals_(3).step_(0.001);
 
 		// ---- Action buttons ----
-		// Audition uses noteOn at the section's anchored pitch. Held voices
-		// live in the standard activeVoices registry; the Note Off button
-		// targets that same pitch, All Notes Off releases everything.
+		// Audition deterministically plays THIS (sample, section) via
+		// #playSectionVoice -- bypasses the key-range resolver so it
+		// always hears the section currently being edited, even if other
+		// sections cover the same key. Held voices register in the
+		// standard activeVoices registry under the section's pitch.
 		auditionBtn = Button(win, Rect(15, 460, 140, 36))
 		.states_([["Audition", Color.white, Color(0.2, 0.55, 0.3)]])
 		.font_(Font(size: 14, bold: true))
 		.action_({
 			var pitch = currentSample.keynum[currentSection].asInteger.clip(0, 127);
-			this.noteOn(pitch);
+			this.playSectionVoice(currentSample, currentSection,
+				keynum: pitch, note: pitch);
 		});
 
 		releaseBtn = Button(win, Rect(165, 460, 140, 36))

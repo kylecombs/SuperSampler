@@ -432,13 +432,49 @@ Read-only access to the override store. code::IdentityDictionary:: keyed by code
 
 
 METHOD:: voiceEditor
-Open the per-sample voice-mode editor window. Without args, opens with the first loaded sample (section 0) selected; the top "Sample:" dropdown switches to any other (sample, section). The cyan band on the waveform is the loop region, orange is the release region -- drag the bands or edit the NumberBoxes. Changes save automatically through link::#-setSampleVoiceArgs::. The Audition button triggers link::#-noteOn:: at the section's anchored pitch.
+Open the per-sample voice-mode editor window. Without args, opens with the first loaded sample (section 0) selected; the top "Sample:" dropdown switches to any other (sample, section). The cyan band on the waveform is the loop region, orange is the release region -- drag the bands or edit the NumberBoxes. Changes save automatically through link::#-setSampleVoiceArgs::. The Audition button triggers link::#-playSectionVoice:: for the section currently shown.
 
 ARGUMENT:: targetSample
 Optional. A code::SampleDescript:: to focus on at open.
 
 ARGUMENT:: targetSection
 Optional. Section index within code::targetSample::. Default code::0::.
+
+
+METHOD:: playSectionVoice
+Direct-section voice trigger. Bypasses link::Classes/SamplerQuery#*getSamplesByKeynum:: -- no key-range resolution, no closest-match fallback. The caller guarantees which code::(sample, section):: plays. Useful for auditioning per-sample overrides when multiple sections share key ranges (and so link::#-noteOn:: with the same keynum could ambiguously pick another section).
+
+Per-sample voice overrides set via link::#-setSampleVoiceArgs:: still apply -- the override lookup keys on code::(sample, section)::, which is exactly what was passed here.
+
+ARGUMENT:: sample
+A code::SampleDescript:: previously loaded into this sampler via link::#-load::.
+
+ARGUMENT:: section
+Section index within code::sample::. Default code::0::.
+
+ARGUMENT:: keynum
+Optional pitch to play at. Defaults to the section's anchored pitch (code::sample.keynum[section]::), which plays at code::rate == 1::.
+
+ARGUMENT:: vel
+MIDI velocity (0..127). Maps to amp as code::vel / 127:: unless code::amp:: is supplied. Default code::64::.
+
+ARGUMENT:: amp
+Optional amplitude multiplier. Overrides the velocity-derived amp.
+
+ARGUMENT:: dur
+Optional duration. Ignored when the voice is gated (the default), which is the typical use case for direct-section play.
+
+ARGUMENT:: pan
+Stereo position, -1 (L) to 1 (R). Default code::0::.
+
+ARGUMENT:: out
+Output bus. Default code::SSampler.defaultOutputBus::.
+
+ARGUMENT:: midiChannel
+Bookkeeping channel for link::Classes/SamplerQuery#*playing::. Default code::0::.
+
+ARGUMENT:: note
+Optional. If supplied, the voice registers in link::#-activeVoices:: under this note and can be released by link::#-noteOff::.
 
 
 METHOD:: playEnv
