@@ -41,7 +41,13 @@ SSampler {
 	var <voiceOrder;
 
 	//Per-(SampleDescript, section) voice-mode overrides.
-	//Shape: IdentityDictionary(SampleDescript -> IdentityDictionary(section -> Event)).
+	//Shape: IdentityDictionary(SampleDescript -> Dictionary(section -> Event)).
+	//Outer dict is identity-keyed because SampleDescript instances are the
+	//natural key. Inner dict is value-keyed (plain Dictionary) because the
+	//section index is an Integer -- IdentityDictionary's `===` lookup is
+	//unreliable for boxed integers in SC, so an inner IdentityDictionary
+	//here would silently fail to find section 1+ on lookup even after a
+	//successful put.
 	//Consulted by SamplerPrepare#playVoice; takes precedence over args passed
 	//to #keyVoice / #noteOn. Has no effect on the concatenative path (#key,
 	//#playArgs, #playEnv) -- those don't go through \ssvoice{1,2}.
@@ -558,19 +564,22 @@ SSampler {
 	// for this (sample, section). To replace wholesale, call
 	// #clearSampleVoiceArgs first.
 	setSampleVoiceArgs {|sample, section = 0, args|
-		var bySection, current;
+		var bySection, current, key;
 		if(sample.isNil) { Error("setSampleVoiceArgs: sample is nil").throw };
 		if(args.isKindOf(Dictionary).not) {
 			Error("setSampleVoiceArgs: args must be an Event/Dictionary").throw;
 		};
+		//Coerce the section index to a stable key. Plain Dictionary uses
+		//`==` so boxed integers compare correctly across put/at calls.
+		key = section.asInteger;
 		bySection = sampleVoiceArgs.at(sample);
 		if(bySection.isNil) {
-			bySection = IdentityDictionary.new;
+			bySection = Dictionary.new;
 			sampleVoiceArgs.put(sample, bySection);
 		};
-		current = bySection.at(section) ?? { Event.new };
+		current = bySection.at(key) ?? { Event.new };
 		args.keysValuesDo({|k, v| current.put(k, v) });
-		bySection.put(section, current);
+		bySection.put(key, current);
 		^current;
 	}
 
@@ -580,7 +589,7 @@ SSampler {
 		if(sample.isNil) { ^nil };
 		bySection = sampleVoiceArgs.at(sample);
 		if(bySection.isNil) { ^nil };
-		^bySection.at(section);
+		^bySection.at(section.asInteger);
 	}
 
 	//With no args: clear all overrides. With sample: clear that sample.
@@ -597,7 +606,7 @@ SSampler {
 		};
 		bySection = sampleVoiceArgs.at(sample);
 		if(bySection.isNil.not) {
-			bySection.removeAt(section);
+			bySection.removeAt(section.asInteger);
 			if(bySection.isEmpty) { sampleVoiceArgs.removeAt(sample) };
 		};
 	}
