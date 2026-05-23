@@ -769,8 +769,23 @@
 
 			try {
 				sf = SoundFile.openRead(smpl.filename);
-				sfv.readFile(sf, startSample, durSample);
-				if(sf.notNil) { sf.close };
+				//Load the WHOLE file, then zoom the view to the section's range.
+				//Reading only the section with readFile(sf, startSample, durSample)
+				//makes the SoundFileView's selection coordinate system relative to
+				//what was read -- our offset math then double-applies startSample
+				//and breaks loop-region drags for any section past the first.
+				//Reading the full file keeps selection coords in absolute file
+				//frames, which is what every other piece of conversion math here
+				//assumes.
+				sfv.soundfile_(sf).read(closeFile: true);
+				//Zoom to just the section's bounds if the SC version supports it.
+				//Pre-3.10 builds may not -- fall back to showing the whole file.
+				try {
+					sfv.setViewableRangeStart(startSample);
+					sfv.setViewableRangeSize(durSample);
+				} {|err|
+					//swallow: the view shows the whole file, which is still usable.
+				};
 			} {|err|
 				statusText.string_("waveform load failed");
 			};
