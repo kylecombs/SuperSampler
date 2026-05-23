@@ -513,6 +513,10 @@
 		.gridOn_(false);
 		sfv.setSelectionColor(0, Color(0.2, 0.85, 0.95, 0.45));   // loop = cyan
 		sfv.setSelectionColor(1, Color(1.0, 0.55, 0.15, 0.45));   // release = orange
+		//Selection 2 is an invisible "section bounds" stash used only as
+		//a zoom target -- zoomSelection(2) constrains the view to the
+		//current section. Transparent color so the user never sees it.
+		sfv.setSelectionColor(2, Color.clear);
 
 		// Frame <-> seconds helpers (resolved per section).
 		frameToSec = {|fr| fr / sectionSR };
@@ -769,23 +773,14 @@
 
 			try {
 				sf = SoundFile.openRead(smpl.filename);
-				//Load the WHOLE file, then zoom the view to the section's range.
-				//Reading only the section with readFile(sf, startSample, durSample)
-				//makes the SoundFileView's selection coordinate system relative to
-				//what was read -- our offset math then double-applies startSample
-				//and breaks loop-region drags for any section past the first.
-				//Reading the full file keeps selection coords in absolute file
-				//frames, which is what every other piece of conversion math here
-				//assumes.
+				//Load the WHOLE file so selection coords stay in absolute
+				//file frames (matches all other math in the editor).
 				sfv.soundfile_(sf).read(closeFile: true);
-				//Zoom to just the section's bounds if the SC version supports it.
-				//Pre-3.10 builds may not -- fall back to showing the whole file.
-				try {
-					sfv.setViewableRangeStart(startSample);
-					sfv.setViewableRangeSize(durSample);
-				} {|err|
-					//swallow: the view shows the whole file, which is still usable.
-				};
+				//Zoom the view to just the section's range by stashing
+				//section bounds on selection index 2 (invisible) and
+				//asking the view to fit that selection.
+				sfv.setSelection(2, [startSample, durSample]);
+				try { sfv.zoomSelection(2) } {|err| };
 			} {|err|
 				statusText.string_("waveform load failed");
 			};
