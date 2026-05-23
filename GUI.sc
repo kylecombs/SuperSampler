@@ -497,9 +497,15 @@
 		.background_(colorSet[1])
 		.stringColor_(colorSet[4]);
 
-		statusText = StaticText(win, Rect(950, 12, 135, 24))
-		.stringColor_(Color(0.85, 0.95, 0.85))
-		.font_(Font(size: 11));
+		// Big status banner across the action-button row -- shows what
+		// was saved / what audition is playing so the user can confirm
+		// overrides are reaching the right (sample, section).
+		statusText = StaticText(win, Rect(465, 460, 470, 36))
+		.string_("status: ready -- edit a control to save, then Audition")
+		.stringColor_(Color(1, 1, 0.7))
+		.background_(Color(0, 0, 0, 0.4))
+		.align_(\center)
+		.font_(Font(size: 13, bold: true));
 
 		// ---- Waveform view ----
 		sfv = SoundFileView(win, Rect(15, 50, 1070, 200))
