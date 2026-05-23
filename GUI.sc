@@ -613,24 +613,27 @@
 
 		// ---- Action buttons ----
 		// Audition deterministically plays THIS (sample, section) via
-		// #playSectionVoice -- bypasses the key-range resolver so it
-		// always hears the section currently being edited, even if other
-		// sections cover the same key. Held voices register in the
-		// standard activeVoices registry under the section's pitch.
+		// #playSectionVoice. Reads the (sample, section) directly from
+		// the dropdown each call so it can't drift from the visible UI.
 		auditionBtn = Button(win, Rect(15, 460, 140, 36))
 		.states_([["Audition", Color.white, Color(0.2, 0.55, 0.3)]])
 		.font_(Font(size: 14, bold: true))
 		.action_({
-			var pitch = currentSample.keynum[currentSection].asInteger.clip(0, 127);
-			this.playSectionVoice(currentSample, currentSection,
-				keynum: pitch, note: pitch);
+			var pair = pairs[sampleSelector.value];
+			var smpl = pair[0], scn = pair[1];
+			var pitch = smpl.keynum[scn].asInteger.clip(0, 127);
+			this.playSectionVoice(smpl, scn, keynum: pitch, note: pitch);
+			statusText.string_("Audition: scn=" ++ scn.asString
+				++ " key=" ++ pitch.asString
+				++ (this.getSampleVoiceArgs(smpl, scn).isNil.if({" (no ovr)"}, {" (ovr OK)"})));
 		});
 
 		releaseBtn = Button(win, Rect(165, 460, 140, 36))
 		.states_([["Note Off", Color.white, Color(0.55, 0.3, 0.2)]])
 		.font_(Font(size: 14, bold: true))
 		.action_({
-			var pitch = currentSample.keynum[currentSection].asInteger.clip(0, 127);
+			var pair = pairs[sampleSelector.value];
+			var pitch = pair[0].keynum[pair[1]].asInteger.clip(0, 127);
 			this.noteOff(pitch);
 		});
 
@@ -643,9 +646,10 @@
 		.states_([["Reset Overrides", Color.white, Color(0.35, 0.35, 0.45)]])
 		.font_(Font(size: 14, bold: true))
 		.action_({
-			this.clearSampleVoiceArgs(currentSample, currentSection);
-			loadSection.(currentSample, currentSection);
-			statusText.string_("Overrides cleared.");
+			var pair = pairs[sampleSelector.value];
+			this.clearSampleVoiceArgs(pair[0], pair[1]);
+			loadSection.(pair[0], pair[1]);
+			statusText.string_("Cleared scn=" ++ pair[1].asString);
 		});
 
 		StaticText(win, Rect(15, 510, 1070, 50))
@@ -655,11 +659,13 @@
 		.font_(Font(size: 11));
 
 		// ----------------------------------------------------------
-		// Override writer. Called from every UI control. Single
-		// source of truth -- always reads the UI then stamps the
-		// override Event for the currently-selected (sample, section).
+		// Override writer. Called from every UI control. Reads (sample,
+		// section) directly from the dropdown so it always saves to the
+		// row the user can see -- never depends on a captured closure var.
 		// ----------------------------------------------------------
 		writeOverride = {
+			var pair = pairs[sampleSelector.value];
+			var smpl = pair[0], scn = pair[1];
 			var overrides = Event.new;
 			overrides[\loop]         = loopOnMenu.value.asInteger;
 			overrides[\loopDir]      = dirSymbols[loopDirMenu.value];
@@ -676,9 +682,10 @@
 			overrides[\sustainLevel] = sustainBox.value.clip(0, 1);
 			overrides[\release]      = releaseBox.value.max(0);
 			//Replace wholesale so deselected fields don't linger.
-			this.clearSampleVoiceArgs(currentSample, currentSection);
-			this.setSampleVoiceArgs(currentSample, currentSection, overrides);
-			statusText.string_("Saved.");
+			this.clearSampleVoiceArgs(smpl, scn);
+			this.setSampleVoiceArgs(smpl, scn, overrides);
+			statusText.string_("Saved scn=" ++ scn.asString
+				++ " A=" ++ overrides[\attack].asString);
 		};
 
 		// ----------------------------------------------------------

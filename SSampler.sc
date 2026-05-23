@@ -41,13 +41,13 @@ SSampler {
 	var <voiceOrder;
 
 	//Per-(SampleDescript, section) voice-mode overrides.
-	//Shape: IdentityDictionary(SampleDescript -> Dictionary(section -> Event)).
-	//Outer dict is identity-keyed because SampleDescript instances are the
-	//natural key. Inner dict is value-keyed (plain Dictionary) because the
-	//section index is an Integer -- IdentityDictionary's `===` lookup is
-	//unreliable for boxed integers in SC, so an inner IdentityDictionary
-	//here would silently fail to find section 1+ on lookup even after a
-	//successful put.
+	//Shape: IdentityDictionary(filename Symbol -> Dictionary(section -> Event)).
+	//Keyed by filename (asSymbol) rather than SampleDescript identity so the
+	//lookup is robust against any object-identity flake -- Symbols are
+	//interned in SC, so the same filename always hashes to the same key.
+	//Inner dict is plain Dictionary (`==` comparison) because the section
+	//index is an Integer; IdentityDictionary's `===` is unreliable for
+	//boxed integers.
 	//Consulted by SamplerPrepare#playVoice; takes precedence over args passed
 	//to #keyVoice / #noteOn. Has no effect on the concatenative path (#key,
 	//#playArgs, #playEnv) -- those don't go through \ssvoice{1,2}.
@@ -563,19 +563,26 @@ SSampler {
 	// Each call merges the supplied keys onto any existing override Event
 	// for this (sample, section). To replace wholesale, call
 	// #clearSampleVoiceArgs first.
+	//Resolve a SampleDescript to its stable filename-Symbol key.
+	prSampleKey {|sample|
+		if(sample.isNil) { ^nil };
+		if(sample.isKindOf(Symbol)) { ^sample };
+		if(sample.isKindOf(String)) { ^sample.asSymbol };
+		^sample.filename.asSymbol;
+	}
+
 	setSampleVoiceArgs {|sample, section = 0, args|
-		var bySection, current, key;
+		var bySection, current, key, sampleKey;
 		if(sample.isNil) { Error("setSampleVoiceArgs: sample is nil").throw };
 		if(args.isKindOf(Dictionary).not) {
 			Error("setSampleVoiceArgs: args must be an Event/Dictionary").throw;
 		};
-		//Coerce the section index to a stable key. Plain Dictionary uses
-		//`==` so boxed integers compare correctly across put/at calls.
+		sampleKey = this.prSampleKey(sample);
 		key = section.asInteger;
-		bySection = sampleVoiceArgs.at(sample);
+		bySection = sampleVoiceArgs.at(sampleKey);
 		if(bySection.isNil) {
 			bySection = Dictionary.new;
-			sampleVoiceArgs.put(sample, bySection);
+			sampleVoiceArgs.put(sampleKey, bySection);
 		};
 		current = bySection.at(key) ?? { Event.new };
 		args.keysValuesDo({|k, v| current.put(k, v) });
@@ -585,9 +592,10 @@ SSampler {
 
 	//Returns the override Event for this (sample, section), or nil.
 	getSampleVoiceArgs {|sample, section = 0|
-		var bySection;
+		var bySection, sampleKey;
 		if(sample.isNil) { ^nil };
-		bySection = sampleVoiceArgs.at(sample);
+		sampleKey = this.prSampleKey(sample);
+		bySection = sampleVoiceArgs.at(sampleKey);
 		if(bySection.isNil) { ^nil };
 		^bySection.at(section.asInteger);
 	}
@@ -595,19 +603,20 @@ SSampler {
 	//With no args: clear all overrides. With sample: clear that sample.
 	//With sample + section: clear that one section's overrides.
 	clearSampleVoiceArgs {|sample = nil, section = nil|
-		var bySection;
+		var bySection, sampleKey;
 		if(sample.isNil) {
 			sampleVoiceArgs = IdentityDictionary.new;
 			^this;
 		};
+		sampleKey = this.prSampleKey(sample);
 		if(section.isNil) {
-			sampleVoiceArgs.removeAt(sample);
+			sampleVoiceArgs.removeAt(sampleKey);
 			^this;
 		};
-		bySection = sampleVoiceArgs.at(sample);
+		bySection = sampleVoiceArgs.at(sampleKey);
 		if(bySection.isNil.not) {
 			bySection.removeAt(section.asInteger);
-			if(bySection.isEmpty) { sampleVoiceArgs.removeAt(sample) };
+			if(bySection.isEmpty) { sampleVoiceArgs.removeAt(sampleKey) };
 		};
 	}
 }//end of Sampler class
