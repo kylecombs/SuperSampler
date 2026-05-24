@@ -40,6 +40,19 @@ SSampler {
 	//Insertion-ordered flat list of all registered voices, for steal policy.
 	var <voiceOrder;
 
+	//Per-(SampleDescript, section) voice-mode overrides.
+	//Shape: IdentityDictionary(filename Symbol -> Dictionary(section -> Event)).
+	//Keyed by filename (asSymbol) rather than SampleDescript identity so the
+	//lookup is robust against any object-identity flake -- Symbols are
+	//interned in SC, so the same filename always hashes to the same key.
+	//Inner dict is plain Dictionary (`==` comparison) because the section
+	//index is an Integer; IdentityDictionary's `===` is unreliable for
+	//boxed integers.
+	//Consulted by SamplerPrepare#playVoice; takes precedence over args passed
+	//to #keyVoice / #noteOn. Has no effect on the concatenative path (#key,
+	//#playArgs, #playEnv) -- those don't go through \ssvoice{1,2}.
+	var <sampleVoiceArgs;
+
 	// Initialization in this class is in SamplerInstruments.sc
 	*initClass {
 	}
@@ -126,6 +139,7 @@ SSampler {
 		averageTemporalCentroid = 0;
 		activeVoices = IdentityDictionary.new;
 		voiceOrder = List.new;
+		sampleVoiceArgs = IdentityDictionary.new;
 		allSampler.put(samplerName.asSymbol, this);
 	}
 
@@ -487,6 +501,123 @@ SSampler {
 
 	allNotesOff {
 		activeVoices.keys.copy.do{|key| this.noteOff(key) };
+	}
+
+
+	//Direct-section voice trigger. Bypasses SamplerQuery.getSamplesByKeynum
+	//-- no key-range resolution, no closest-match fallback. The caller
+	//guarantees which (sample, section) plays. Useful for auditioning
+	//per-sample overrides where multiple sections share key ranges.
+	//
+	//Per-sample voice overrides (#setSampleVoiceArgs) still apply -- the
+	//override lookup keys on (sample, section), which is exactly what was
+	//passed here.
+	//
+	//If `note` is supplied, the voice is registered in #activeVoices so
+	//#noteOff (and the voice-cap policy) work the same way as for #noteOn.
+	playSectionVoice {arg sample, section = 0, keynum = nil, vel = 64, amp = nil,
+		dur = nil, pan = 0, out = this.class.defaultOutputBus,
+		midiChannel = 0, note = nil;
+		var resolvedAmp = amp ? (vel / 127);
+		var sectionKey  = sample.keynum[section];
+		//Default: play at the section's anchored pitch (rate == 1).
+		var triggerKey  = keynum ? sectionKey;
+		var keySign     = triggerKey.sign;
+		var args        = SamplerArguments.new;
+		var prep        = SamplerPrepare.new;
+
+		args.set(keynums: triggerKey, amp: resolvedAmp, dur: dur, pan: pan,
+			texture: 1, out: out, midiChannel: midiChannel, gate: 1, loop: 1);
+
+		prep.bufServer   = bufServer;
+		prep.sample      = sample;
+		prep.samplerName = this.name;
+		prep.duration    = args.dur;
+		prep.section     = section;
+		prep.setRate(2**((triggerKey.abs - sectionKey)/12) * (keySign + 1 - keySign.abs));
+		prep.buffer      = sample.activeBuffer[section];
+		prep.midiChannel = args.midiChannel;
+		args.setSamples([prep]);
+
+		^this.playVoiceArgs(args, note);
+	}
+
+
+	//==============================================================
+	// Per-sample voice-mode overrides
+	//==============================================================
+	// Configure voice-mode args on a per-(SampleDescript, section) basis.
+	// Overrides apply only to voices triggered via #keyVoice / #noteOn
+	// (not to #key / #playArgs / #playEnv -- those use the concatenative
+	// SynthDefs which have no loop / release-region support).
+	//
+	// Recognised keys (any subset):
+	//   loop, loopDir, loopMode, loopStart, loopEnd, loopXfade,
+	//   attack, decay, sustainLevel, release,
+	//   releaseMode, releaseStart, releaseEnd, releaseXfade,
+	//   ampenv  -- an Env. If set, bypasses the ADSR builder and is plugged
+	//              directly into the \env control. A release node is added
+	//              automatically if the Env doesn't have one and the voice
+	//              is gated.
+	//
+	// Each call merges the supplied keys onto any existing override Event
+	// for this (sample, section). To replace wholesale, call
+	// #clearSampleVoiceArgs first.
+	//Resolve a SampleDescript to its stable filename-Symbol key.
+	prSampleKey {|sample|
+		if(sample.isNil) { ^nil };
+		if(sample.isKindOf(Symbol)) { ^sample };
+		if(sample.isKindOf(String)) { ^sample.asSymbol };
+		^sample.filename.asSymbol;
+	}
+
+	setSampleVoiceArgs {|sample, section = 0, args|
+		var bySection, current, key, sampleKey;
+		if(sample.isNil) { Error("setSampleVoiceArgs: sample is nil").throw };
+		if(args.isKindOf(Dictionary).not) {
+			Error("setSampleVoiceArgs: args must be an Event/Dictionary").throw;
+		};
+		sampleKey = this.prSampleKey(sample);
+		key = section.asInteger;
+		bySection = sampleVoiceArgs.at(sampleKey);
+		if(bySection.isNil) {
+			bySection = Dictionary.new;
+			sampleVoiceArgs.put(sampleKey, bySection);
+		};
+		current = bySection.at(key) ?? { Event.new };
+		args.keysValuesDo({|k, v| current.put(k, v) });
+		bySection.put(key, current);
+		^current;
+	}
+
+	//Returns the override Event for this (sample, section), or nil.
+	getSampleVoiceArgs {|sample, section = 0|
+		var bySection, sampleKey;
+		if(sample.isNil) { ^nil };
+		sampleKey = this.prSampleKey(sample);
+		bySection = sampleVoiceArgs.at(sampleKey);
+		if(bySection.isNil) { ^nil };
+		^bySection.at(section.asInteger);
+	}
+
+	//With no args: clear all overrides. With sample: clear that sample.
+	//With sample + section: clear that one section's overrides.
+	clearSampleVoiceArgs {|sample = nil, section = nil|
+		var bySection, sampleKey;
+		if(sample.isNil) {
+			sampleVoiceArgs = IdentityDictionary.new;
+			^this;
+		};
+		sampleKey = this.prSampleKey(sample);
+		if(section.isNil) {
+			sampleVoiceArgs.removeAt(sampleKey);
+			^this;
+		};
+		bySection = sampleVoiceArgs.at(sampleKey);
+		if(bySection.isNil.not) {
+			bySection.removeAt(section.asInteger);
+			if(bySection.isEmpty) { sampleVoiceArgs.removeAt(sampleKey) };
+		};
 	}
 }//end of Sampler class
 

@@ -24,33 +24,39 @@ SamplerQuery {
 		keyNums.asArray.do{|keyNum, keynumIndex|
 			var sampleList = [];
 			var keySign = keyNum.sign;
-			var samplePrep = SamplerPrepare.new;
 
-			samplePrep.bufServer = sampler.bufServer;
 			keyNum = keyNum.abs;
 
-			//find keyNums in the keyRanges of each sample sections, send the sample section information
+			//Find every (sample, section) whose keyRange contains keyNum.
+			//Each match creates a NEW SamplerPrepare -- previously a single
+			//instance was reused and mutated across iterations, so the list
+			//ended up holding N references to the last-matched section.
+			//That broke any code that introspects (sample, section) per
+			//entry, including per-sample voice-mode overrides.
 			sampler.keyRanges.keysValuesDo{|thisSample, thisKeyRange|
-				// for each section in the sample
-				thisKeyRange.do{|thisSection, idx| //idx is the section indes within the sample
+				thisKeyRange.do{|thisSection, idx| //idx is the section index within the sample
 					if((keyNum <= thisSection[1]) && (keyNum >= thisSection[0]))
 					{
-						samplePrep.sample = thisSample;
-						samplePrep.samplerName = sampler.name;
-						samplePrep.duration = args.dur;
-						samplePrep.section = idx;
-						samplePrep.setRate(2**((keyNum - thisSample.keynum[idx])/12) * (keySign + 1 - keySign.abs));
-						samplePrep.buffer = samplePrep.sample.activeBuffer[samplePrep.section];
-						samplePrep.midiChannel = args.midiChannel;
-						sampleList = sampleList.add(samplePrep)
+						var prep = SamplerPrepare.new;
+						prep.bufServer = sampler.bufServer;
+						prep.sample = thisSample;
+						prep.samplerName = sampler.name;
+						prep.duration = args.dur;
+						prep.section = idx;
+						prep.setRate(2**((keyNum - thisSample.keynum[idx])/12) * (keySign + 1 - keySign.abs));
+						prep.buffer = prep.sample.activeBuffer[prep.section];
+						prep.midiChannel = args.midiChannel;
+						sampleList = sampleList.add(prep);
 					};
 				}
 			};
 
-			//When nothing is found in the keyRange, find the closest keynum to be the buffer.
+			//Fallback: nothing matched -- pick the section with the closest keynum.
 			if(sampleList.isEmpty)
 			{
+				var prep = SamplerPrepare.new;
 				var sortIndexes = Dictionary.new;
+				var closestAddr;
 
 				sampler.samples.do{|thisSample, index|
 					thisSample.keynum.do{|thisKeynum, idx|
@@ -60,22 +66,20 @@ SamplerQuery {
 				};
 
 				sortIndexes = sortIndexes.asSortedArray.flop;
-
 				// sortIndexes[0] == keynums in sorted order
 				// sortIndexes[1] == Index arrays in sorted order
-				// address for the closest keynum will be:
-				// sortIndexes[1][sortIndexes[0].indexIn(keyNum)]
-				samplePrep.sample = sampler.samples[sortIndexes[1][sortIndexes[0].indexIn(keyNum)][0]];
-				samplePrep.samplerName = sampler.name;
-				samplePrep.duration = args.dur;
-				samplePrep.section = sortIndexes[1][sortIndexes[0].indexIn(keyNum)][1];
-				samplePrep.setRate(2**((keyNum - samplePrep.sample.keynum[samplePrep.section]) / 12) * (keySign + 1 - keySign.abs));
-				samplePrep.buffer = samplePrep.sample.activeBuffer[samplePrep.section];
-				//samplePrep.duration = args.dur;
-				samplePrep.midiChannel = args.midiChannel;
+				closestAddr = sortIndexes[1][sortIndexes[0].indexIn(keyNum)];
 
+				prep.bufServer = sampler.bufServer;
+				prep.sample = sampler.samples[closestAddr[0]];
+				prep.samplerName = sampler.name;
+				prep.duration = args.dur;
+				prep.section = closestAddr[1];
+				prep.setRate(2**((keyNum - prep.sample.keynum[prep.section]) / 12) * (keySign + 1 - keySign.abs));
+				prep.buffer = prep.sample.activeBuffer[prep.section];
+				prep.midiChannel = args.midiChannel;
 
-				sampleList = sampleList.add(samplePrep);
+				sampleList = sampleList.add(prep);
 			};
 
 
@@ -83,13 +87,16 @@ SamplerQuery {
 			//Sample pitch closer to the key number gets picked first.
 			sampleList = sampleList.sort({|a,b| (a.sample.keynum[a.section]-keyNum).abs < (b.sample.keynum[b.section]-keyNum).abs})[0..(texture !? {texture-1})];
 
-			//make textures with minor pitch diviation if the size of samples doesn't reach the texture value.
+			//Pad up to `texture` voices by duplicating with minor pitch
+			//deviation. wrapExtend yields references; copy each so mutating
+			//the duplicates doesn't clobber the originals already in sampleList.
 			if(texture.isNumber){
 				if(sampleList.size < texture) {
 					var prepList = sampleList.wrapExtend(texture - sampleList.size);
 					prepList.do{|thisSamplePrep, index|
-						thisSamplePrep.setRate(2**((keyNum + rand2(0.3) - samplePrep.sample.keynum[samplePrep.section]) / 12) * (keySign + 1 - keySign.abs));
-						sampleList = sampleList.add(thisSamplePrep);
+						var clone = thisSamplePrep.copy;
+						clone.setRate(2**((keyNum + rand2(0.3) - clone.sample.keynum[clone.section]) / 12) * (keySign + 1 - keySign.abs));
+						sampleList = sampleList.add(clone);
 					}
 				}
 			};
