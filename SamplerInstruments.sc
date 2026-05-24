@@ -262,6 +262,77 @@
 				var env = EnvGen.kr(envCtl, gate, doneAction: 2);
 				Out.ar(out, Balance2.ar(sigL * env * amp, sigR * env * amp, pan));
 			}).add;
+
+
+			// PaulStretch-style per-section time stretch (mono).
+			//
+			// Pitch-preserving extreme time stretch in the spirit of Paul
+			// Nasca's PaulStretch. Two stages:
+			//   1. Warp1 traverses the section slowly: the read pointer sweeps
+			//      0 -> 1 across the whole buffer over `dur` seconds (which the
+			//      caller has already multiplied by the stretch factor). Grains
+			//      play at freqScale = rate, so pitch is owned by `rate`
+			//      (rate = 1 -> original pitch) and is *independent* of the
+			//      stretch amount -- stretching never changes pitch.
+			//   2. FFT -> PV_Diffuser -> IFFT randomizes the phase of every bin
+			//      each frame while preserving magnitudes. This is the
+			//      characteristic PaulStretch move: it dissolves the periodic
+			//      grain-rate artifacts Warp1 leaves behind into the smooth,
+			//      smeared spectral wash PaulStretch is known for.
+			//
+			// fftSize is a SynthDef-build constant (LocalBuf requires it). The
+			// grain window length and overlap count are exposed as controls.
+			// Lifetime is the gate-driven \env (doneAction:2), same contract as
+			// \ssvoice1: one-shot callers pass a self-terminating linen sized to
+			// the stretched duration; gated callers hold the note open and drop
+			// gate to release.
+			SynthDef(\sspaulstretch1, {arg buf, rate = 1, amp = 1, pan = 0, out = 0,
+				                startPos = 0, dur = 1, gate = 1,
+				                windowSize = 0.25, overlaps = 4;
+				var fftSize = 4096;
+				var envCtl = \env.kr(Env.newClear(8).asArray);
+				var bufDur = BufDur.kr(buf);
+				var start = (startPos / bufDur).clip(0, 1);
+				// Pointer sweeps from the start position to the buffer end over
+				// the (already stretched) duration. Held at 1 once it arrives.
+				var ptr = Line.ar(start, 1, dur);
+				var grains = Warp1.ar(1, buf, ptr, rate * BufRateScale.kr(buf),
+					windowSize, -1, overlaps, 0.1, 2);
+				// Re-randomize bin phases once per FFT frame (frame period =
+				// fftSize * hop samples; hop = 0.5).
+				var frameTrig = Impulse.kr(SampleRate.ir / (fftSize * 0.5));
+				var chain = FFT(LocalBuf(fftSize), grains, 0.5, 0);
+				var sig;
+				chain = PV_Diffuser(chain, frameTrig);
+				sig = IFFT(chain, 0);
+				Out.ar(out, Pan2.ar(sig * EnvGen.kr(envCtl, gate, doneAction: 2) * amp, pan));
+			}).add;
+
+
+			// PaulStretch-style per-section time stretch (stereo).
+			// Mirrors \sspaulstretch1 with an independent Warp1 + FFT chain per
+			// channel (buf0 = L, buf1 = R) and Balance2 positioning. Pointer
+			// timing derives from buf0 (loader allocates L/R as a matched pair).
+			SynthDef(\sspaulstretch2, {arg buf0, buf1, rate = 1, amp = 1, pan = 0, out = 0,
+				                startPos = 0, dur = 1, gate = 1,
+				                windowSize = 0.25, overlaps = 4;
+				var fftSize = 4096;
+				var envCtl = \env.kr(Env.newClear(8).asArray);
+				var bufDur = BufDur.kr(buf0);
+				var start = (startPos / bufDur).clip(0, 1);
+				var ptr = Line.ar(start, 1, dur);
+				var frameTrig = Impulse.kr(SampleRate.ir / (fftSize * 0.5));
+				var grainsL = Warp1.ar(1, buf0, ptr, rate * BufRateScale.kr(buf0),
+					windowSize, -1, overlaps, 0.1, 2);
+				var grainsR = Warp1.ar(1, buf1, ptr, rate * BufRateScale.kr(buf1),
+					windowSize, -1, overlaps, 0.1, 2);
+				var chainL = PV_Diffuser(FFT(LocalBuf(fftSize), grainsL, 0.5, 0), frameTrig);
+				var chainR = PV_Diffuser(FFT(LocalBuf(fftSize), grainsR, 0.5, 0), frameTrig);
+				var sigL = IFFT(chainL, 0);
+				var sigR = IFFT(chainR, 0);
+				var env = EnvGen.kr(envCtl, gate, doneAction: 2);
+				Out.ar(out, Balance2.ar(sigL * env * amp, sigR * env * amp, pan));
+			}).add;
 		})
 	}
 

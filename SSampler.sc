@@ -401,6 +401,7 @@ SSampler {
 		loopStart = nil, loopEnd = nil, loopXfade = 0.02,
 		attack = 0.005, decay = 0.0, sustainLevel = 1, release = 0.05,
 		releaseMode = \off, releaseStart = nil, releaseEnd = nil, releaseXfade = 0.02,
+		stretch = nil, stretchWindow = 0.25,
 		note = nil;
 		var args = SamplerArguments.new;
 		var playkey = keynums ? {rrand(10.0, 100.0)};
@@ -410,7 +411,8 @@ SSampler {
 			loopStart: loopStart, loopEnd: loopEnd, loopXfade: loopXfade,
 			attack: attack, decay: decay, sustainLevel: sustainLevel, release: release,
 			releaseMode: releaseMode, releaseStart: releaseStart,
-			releaseEnd: releaseEnd, releaseXfade: releaseXfade);
+			releaseEnd: releaseEnd, releaseXfade: releaseXfade,
+			stretch: stretch, stretchWindow: stretchWindow);
 		args.setSamples(SamplerQuery.getSamplesByKeynum(this, args));
 		^this.playVoiceArgs(args, note);
 	}
@@ -477,6 +479,7 @@ SSampler {
 		loopStart = nil, loopEnd = nil, loopXfade = 0.02,
 		attack = 0.005, decay = 0.0, sustainLevel = 1, release = 0.05,
 		releaseMode = \off, releaseStart = nil, releaseEnd = nil, releaseXfade = 0.02,
+		stretch = nil, stretchWindow = 0.25,
 		dur = nil, pan = 0, out = this.class.defaultOutputBus,
 		midiChannel = 0, texture = 1;
 		var resolvedAmp = amp ? (vel / 127);
@@ -487,6 +490,7 @@ SSampler {
 			attack: attack, decay: decay, sustainLevel: sustainLevel, release: release,
 			releaseMode: releaseMode, releaseStart: releaseStart,
 			releaseEnd: releaseEnd, releaseXfade: releaseXfade,
+			stretch: stretch, stretchWindow: stretchWindow,
 			note: note);
 	}
 
@@ -517,7 +521,7 @@ SSampler {
 	//#noteOff (and the voice-cap policy) work the same way as for #noteOn.
 	playSectionVoice {arg sample, section = 0, keynum = nil, vel = 64, amp = nil,
 		dur = nil, pan = 0, out = this.class.defaultOutputBus,
-		midiChannel = 0, note = nil;
+		midiChannel = 0, stretch = nil, stretchWindow = 0.25, note = nil;
 		var resolvedAmp = amp ? (vel / 127);
 		var sectionKey  = sample.keynum[section];
 		//Default: play at the section's anchored pitch (rate == 1).
@@ -527,7 +531,8 @@ SSampler {
 		var prep        = SamplerPrepare.new;
 
 		args.set(keynums: triggerKey, amp: resolvedAmp, dur: dur, pan: pan,
-			texture: 1, out: out, midiChannel: midiChannel, gate: 1, loop: 1);
+			texture: 1, out: out, midiChannel: midiChannel, gate: 1, loop: 1,
+			stretch: stretch, stretchWindow: stretchWindow);
 
 		prep.bufServer   = bufServer;
 		prep.sample      = sample;

@@ -33,6 +33,12 @@ SamplerArguments{
 	var <> sustainLevel = 1;     //0..1; level held while gate == 1
 	var <> release = 0.05;
 
+	//PaulStretch-style per-section time stretch (voice path only).
+	//nil or 1 -> off (plain \ssvoice playback). >1 stretches, 0<x<1 compresses.
+	//Pitch is preserved; only the playback timebase changes.
+	var <> stretch = nil;
+	var <> stretchWindow = 0.25;  //Warp1 grain window (s); larger -> smoother smear.
+
 	//Ableton-style release region (second loop). Engaged on note-off (gate -> 0).
 	//Inert when releaseMode == \off.
 	var <> releaseMode = \off;   //\off / \oneShot / \loop / \palin
@@ -92,7 +98,7 @@ SamplerArguments{
 
 	set{|keynums, syncmode, detune, dur, amp, ampenv, pan, out, panenv, bendenv, texture, expand, grainRate, grainDur, midiChannel, env, morph,
 		gate, loop, loopDir, loopMode, loopStart, loopEnd, loopXfade, attack, decay, sustainLevel, release,
-		releaseMode, releaseStart, releaseEnd, releaseXfade|
+		releaseMode, releaseStart, releaseEnd, releaseXfade, stretch, stretchWindow|
 		this.keynums = keynums.value.asArray.flat ? this.keynums.asArray.flat;
 		this.detune = detune.value ? this.detune;
 		this.syncmode = syncmode ? this.syncmode;
@@ -116,6 +122,8 @@ SamplerArguments{
 		this.releaseStart = releaseStart ? this.releaseStart;
 		this.releaseEnd = releaseEnd ? this.releaseEnd;
 		this.releaseXfade = releaseXfade ? this.releaseXfade;
+		this.stretch = stretch ? this.stretch;
+		this.stretchWindow = stretchWindow ? this.stretchWindow;
 		// this.env = env.value ? this.env;
 		this.texture = texture.value ? SSampler.defaultTexture;
 		// this.morphNum = morph.asArray[0] ? this.morphNum;
