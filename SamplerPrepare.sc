@@ -174,9 +174,10 @@ SamplerPrepare {
 		];
 
 		synth = if(stretchActive) {
-			//PaulStretch path. Honors rate (pitch), amp, pan, out, startPos and
-			//the gate-driven envelope; loop/release-region args do not apply
-			//(the Warp1 pointer is a one-shot traversal of the section).
+			//PaulStretch path. Honors rate (pitch), amp, pan, out, startPos,
+			//the gate-driven envelope, and the loop region (loopStart/loopEnd/
+			//loopDir). loopMode/loopXfade and the release region do not apply
+			//(the FFT phase smear masks the loop seam on its own).
 			var psCommon = [
 				\rate, this.rate,
 				\amp, args.amp,
@@ -186,6 +187,10 @@ SamplerPrepare {
 				\dur, envSpan,
 				\gate, args.gate,
 				\windowSize, effStretchWindow ? 0.25,
+				\loop, effLoop,
+				\loopDir, loopDirInt,
+				\loopStart, effLoopStart ? 0,
+				\loopEnd, effLoopEnd ? 0,
 				\env, voiceEnv
 			];
 			if(buffer.size == 2) {

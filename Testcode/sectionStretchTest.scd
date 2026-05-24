@@ -82,6 +82,28 @@ t.keyVoice(t.samples[0].keynum[0] + 12, stretch: 15, amp: 0.7);  // +octave, str
 
 
 // ============================================================
+// 5b. Loop region under stretch
+// ============================================================
+// Loop points work at any stretch amount: the pointer wraps inside
+// [loopStart, loopEnd] at the stretched speed instead of sweeping the
+// whole section once. Release with noteOff (the looped voice is held).
+(
+~b = t.samples[0].activeBuffer[0][0];   // mono section-0 buffer
+~mid = (~b.numFrames * 0.5).asInteger;
+~v = t.keyVoice(81, stretch: 12, loop: 1, loopStart: ~mid, loopEnd: ~b.numFrames, note: 81);
+)
+// HEAR: only the second half of the section, stretched 12x, looping.
+t.noteOff(81);
+
+// Reverse and palindrome loop directions under stretch.
+~v = t.keyVoice(81, stretch: 12, loop: 1, loopDir: \rev, note: 81);
+t.noteOff(81);
+
+~v = t.keyVoice(81, stretch: 12, loop: 1, loopDir: \palin, note: 81);
+t.noteOff(81);
+
+
+// ============================================================
 // 6. Per-section override (the per-section control)
 // ============================================================
 // Bake a stretch into section 0 of the first sample. Any subsequent

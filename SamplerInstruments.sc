@@ -268,34 +268,58 @@
 			//
 			// Pitch-preserving extreme time stretch in the spirit of Paul
 			// Nasca's PaulStretch. Two stages:
-			//   1. Warp1 traverses the section slowly: the read pointer sweeps
-			//      0 -> 1 across the whole buffer over `dur` seconds (which the
-			//      caller has already multiplied by the stretch factor). Grains
-			//      play at freqScale = rate, so pitch is owned by `rate`
-			//      (rate = 1 -> original pitch) and is *independent* of the
-			//      stretch amount -- stretching never changes pitch.
+			//   1. Warp1 traverses the section slowly. The read pointer sweeps
+			//      across the buffer at a speed of one buffer-length per `dur`
+			//      seconds (the caller bakes the stretch factor into `dur`).
+			//      With loop == 0 the pointer is a one-shot Line start -> end;
+			//      with loop == 1 it is a Phasor that wraps inside the
+			//      [loopStart, loopEnd] region (loopDir: 0 fwd, 1 rev, 2 palin),
+			//      so loop points work at any stretch amount. Grains play at
+			//      freqScale = rate, so pitch is owned by `rate` (rate = 1 ->
+			//      original pitch) and is *independent* of the stretch amount --
+			//      stretching never changes pitch.
 			//   2. FFT -> PV_Diffuser -> IFFT randomizes the phase of every bin
 			//      each frame while preserving magnitudes. This is the
 			//      characteristic PaulStretch move: it dissolves the periodic
 			//      grain-rate artifacts Warp1 leaves behind into the smooth,
-			//      smeared spectral wash PaulStretch is known for.
+			//      smeared spectral wash PaulStretch is known for, and also
+			//      masks the loop seam (no explicit crossfade needed).
 			//
 			// fftSize is a SynthDef-build constant (LocalBuf requires it). The
 			// grain window length and overlap count are exposed as controls.
+			// loopMode / loopXfade and the release region do not apply here.
 			// Lifetime is the gate-driven \env (doneAction:2), same contract as
 			// \ssvoice1: one-shot callers pass a self-terminating linen sized to
-			// the stretched duration; gated callers hold the note open and drop
-			// gate to release.
+			// the stretched duration; gated/looped callers hold the note open
+			// and drop gate to release.
 			SynthDef(\sspaulstretch1, {arg buf, rate = 1, amp = 1, pan = 0, out = 0,
 				                startPos = 0, dur = 1, gate = 1,
-				                windowSize = 0.25, overlaps = 4;
+				                windowSize = 0.25, overlaps = 4,
+				                loop = 0, loopDir = 0, loopStart = 0, loopEnd = 0;
 				var fftSize = 4096;
 				var envCtl = \env.kr(Env.newClear(8).asArray);
 				var bufDur = BufDur.kr(buf);
+				var bufFrames = BufFrames.kr(buf);
 				var start = (startPos / bufDur).clip(0, 1);
-				// Pointer sweeps from the start position to the buffer end over
+				// Normalized loop bounds (loopEnd <= 0 -> whole buffer).
+				var lEnd = Select.kr(loopEnd > 0, [bufFrames, loopEnd]);
+				var lStartNorm = (loopStart / bufFrames).clip(0, 1);
+				var lEndNorm = (lEnd / bufFrames).clip(0, 1);
+				var lLenNorm = (lEndNorm - lStartNorm).max(0.0001);
+				// Pointer speed in normalized buffer-fraction per sample: the
+				// whole buffer (1.0) is traversed in `dur` seconds, so the
+				// stretch factor baked into `dur` is honored inside the loop
+				// region too.
+				var ptrSpeed = 1 / (dur * SampleRate.ir);
+				var fwd = Phasor.ar(0, ptrSpeed,     lStartNorm, lEndNorm, lStartNorm);
+				var rev = Phasor.ar(0, ptrSpeed.neg, lStartNorm, lEndNorm, lEndNorm);
+				var tri = Phasor.ar(0, ptrSpeed, 0, 2 * lLenNorm);
+				var pal = lStartNorm + (lLenNorm - (tri - lLenNorm).abs);
+				var loopPtr = Select.ar(loopDir, [fwd, rev, pal]);
+				// One-shot: sweep from the start position to the buffer end over
 				// the (already stretched) duration. Held at 1 once it arrives.
-				var ptr = Line.ar(start, 1, dur);
+				var onePtr = Line.ar(start, 1, dur);
+				var ptr = Select.ar(loop, [onePtr, loopPtr]);
 				var grains = Warp1.ar(1, buf, ptr, rate * BufRateScale.kr(buf),
 					windowSize, -1, overlaps, 0.1, 2);
 				// Re-randomize bin phases once per FFT frame (frame period =
@@ -315,12 +339,25 @@
 			// timing derives from buf0 (loader allocates L/R as a matched pair).
 			SynthDef(\sspaulstretch2, {arg buf0, buf1, rate = 1, amp = 1, pan = 0, out = 0,
 				                startPos = 0, dur = 1, gate = 1,
-				                windowSize = 0.25, overlaps = 4;
+				                windowSize = 0.25, overlaps = 4,
+				                loop = 0, loopDir = 0, loopStart = 0, loopEnd = 0;
 				var fftSize = 4096;
 				var envCtl = \env.kr(Env.newClear(8).asArray);
 				var bufDur = BufDur.kr(buf0);
+				var bufFrames = BufFrames.kr(buf0);
 				var start = (startPos / bufDur).clip(0, 1);
-				var ptr = Line.ar(start, 1, dur);
+				var lEnd = Select.kr(loopEnd > 0, [bufFrames, loopEnd]);
+				var lStartNorm = (loopStart / bufFrames).clip(0, 1);
+				var lEndNorm = (lEnd / bufFrames).clip(0, 1);
+				var lLenNorm = (lEndNorm - lStartNorm).max(0.0001);
+				var ptrSpeed = 1 / (dur * SampleRate.ir);
+				var fwd = Phasor.ar(0, ptrSpeed,     lStartNorm, lEndNorm, lStartNorm);
+				var rev = Phasor.ar(0, ptrSpeed.neg, lStartNorm, lEndNorm, lEndNorm);
+				var tri = Phasor.ar(0, ptrSpeed, 0, 2 * lLenNorm);
+				var pal = lStartNorm + (lLenNorm - (tri - lLenNorm).abs);
+				var loopPtr = Select.ar(loopDir, [fwd, rev, pal]);
+				var onePtr = Line.ar(start, 1, dur);
+				var ptr = Select.ar(loop, [onePtr, loopPtr]);
 				var frameTrig = Impulse.kr(SampleRate.ir / (fftSize * 0.5));
 				var grainsL = Warp1.ar(1, buf0, ptr, rate * BufRateScale.kr(buf0),
 					windowSize, -1, overlaps, 0.1, 2);
