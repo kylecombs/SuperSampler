@@ -104,6 +104,35 @@ t.noteOff(81);
 
 
 // ============================================================
+// 5c. Release region under stretch
+// ============================================================
+// The Ableton-style release region works while stretched: on note-off the
+// pointer crossfades from the sustain region to the release region and
+// plays it (oneShot / loop / palin) while the amp envelope releases.
+// `release` must be long enough to hear it.
+(
+~b = t.samples[0].activeBuffer[0][0];
+~rs = (~b.numFrames * 0.7).asInteger;   // release region = last 30%
+~v = t.keyVoice(81,
+	stretch: 12, loop: 1,
+	release: 3,
+	releaseMode: \loop, releaseStart: ~rs, releaseEnd: ~b.numFrames, note: 81);
+)
+t.noteOff(81);
+// HEAR: stretched sustain loop; after note-off, the last 30% loops by
+// itself, fading out over the 3s release tail.
+
+// One-shot release region under stretch.
+(
+~v = t.keyVoice(81,
+	stretch: 12, loop: 1,
+	release: 3,
+	releaseMode: \oneShot, releaseStart: ~rs, releaseEnd: ~b.numFrames, note: 81);
+)
+t.noteOff(81);
+
+
+// ============================================================
 // 6. Per-section override (the per-section control)
 // ============================================================
 // Bake a stretch into section 0 of the first sample. Any subsequent
