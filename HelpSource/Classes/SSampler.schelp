@@ -233,6 +233,8 @@ SUBSECTION:: Voice mode (gated playback)
 
 The voice-mode API is an opt-in alternative to link::#-key:: for MIDI-keyboard-style triggering. It does NOT touch the existing concatenative engine (link::Classes/SamplerQuery#*getPlayTime::); voice synths run through dedicated SynthDefs (code::\ssvoice1::, code::\ssvoice2::) that are gated by an envelope rather than by a fixed duration. Each voice is registered under its note in link::#-activeVoices:: and can be released by sending link::#-noteOff::.
 
+A per-section, pitch-preserving time stretch (in the spirit of PaulStretch) is available on the voice path via the code::stretch:: argument / override; when active the voice routes through code::\sspaulstretch1:: / code::\sspaulstretch2:: instead. See the code::stretch:: argument of link::#-keyVoice::.
+
 
 METHOD:: keyVoice
 One-shot or sustained voice trigger. Mirrors link::#-key:: but bypasses link::Classes/SamplerQuery#*getPlayTime:: and routes through code::\ssvoice1:: / code::\ssvoice2::.
@@ -317,6 +319,12 @@ Release region end, in frames. code::nil:: -> whole section buffer (resolved ser
 ARGUMENT:: releaseXfade
 Crossfade time from sustain pointer to release-region pointer at note-off, in seconds. Default code::0.02::. Ignored when code::releaseMode == \off::.
 
+ARGUMENT:: stretch
+PaulStretch-style time-stretch factor. code::nil:: or code::1:: (default) -- off; the voice plays through code::\ssvoice1:: / code::\ssvoice2:: unchanged. code::> 1:: stretches the section (e.g. code::20:: plays it 20x slower); code::0 < x < 1:: compresses it. The stretch is pitch-preserving -- only the playback timebase changes. When active, the voice routes through code::\sspaulstretch1:: / code::\sspaulstretch2:: (Warp1 granular traversal + per-frame FFT phase randomization). The loop region and the Ableton-style release region both still work: with code::loop == 1:: the read pointer wraps inside code::[loopStart, loopEnd]:: honoring code::loopDir:: (code::\fwd:: / code::\rev:: / code::\palin::) at the stretched speed, and on note-off the pointer crossfades to the release region per code::releaseMode:: / code::releaseStart:: / code::releaseEnd:: / code::releaseXfade::. The FFT phase smear masks the seams, so code::loopMode:: / code::loopXfade:: are ignored on this path.
+
+ARGUMENT:: stretchWindow
+Grain window length for the stretch, in seconds. Default code::0.25::. Larger windows give a smoother, more diffuse smear; shorter windows preserve more transient detail. Only meaningful when code::stretch:: is active.
+
 ARGUMENT:: note
 Optional. If supplied, the resulting voice is registered in link::#-activeVoices:: under this key and can be released by link::#-noteOff::.
 
@@ -344,7 +352,7 @@ Default code::\fwd::.
 ARGUMENT:: loopMode
 Default code::\trapezoid::.
 
-ARGUMENT:: loopStart, loopEnd, loopXfade, attack, decay, sustainLevel, release, releaseMode, releaseStart, releaseEnd, releaseXfade, dur, pan, out, midiChannel, texture
+ARGUMENT:: loopStart, loopEnd, loopXfade, attack, decay, sustainLevel, release, releaseMode, releaseStart, releaseEnd, releaseXfade, stretch, stretchWindow, dur, pan, out, midiChannel, texture
 See link::#-keyVoice::.
 
 returns:: A code::List:: of code::Synth::.
@@ -384,6 +392,7 @@ list::
 ## code::loop::, code::loopDir::, code::loopMode::, code::loopStart::, code::loopEnd::, code::loopXfade::
 ## code::attack::, code::decay::, code::sustainLevel::, code::release::
 ## code::releaseMode::, code::releaseStart::, code::releaseEnd::, code::releaseXfade::
+## code::stretch::, code::stretchWindow:: -- PaulStretch-style pitch-preserving time stretch. code::stretch:: == 1 (or unset) keeps the plain voice path; > 1 stretches the section, 0..1 compresses. See link::#-keyVoice::.
 ## code::ampenv:: -- an code::Env::. Bypasses the ADSR builder and is plugged into the code::\env:: control directly. A release node is added automatically if the Env doesn't have one and the voice is gated.
 ::
 

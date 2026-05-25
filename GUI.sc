@@ -438,6 +438,7 @@
 		var loopStartBox, loopEndBox, loopXfadeBox;
 		var relModeMenu, relStartBox, relEndBox, relXfadeBox;
 		var attackBox, decayBox, sustainBox, releaseBox;
+		var stretchBox, stretchWindowBox;
 		var statusText;
 		var auditionBtn, releaseBtn, allOffBtn, resetBtn;
 		var loadSection, writeOverride, frameToSec, secToFrame;
@@ -621,6 +622,26 @@
 		.background_(colorSet[1]).stringColor_(colorSet[4]).maxDecimals_(4)
 		.minDecimals_(3).step_(0.001);
 
+		// ---- PaulStretch time stretch ----
+		// Pitch-preserving per-section stretch. factor == 1 -> off (plain
+		// voice playback); > 1 stretches, between 0 and 1 compresses.
+		StaticText(win, Rect(700, 380, 385, 24))
+		.string_("Time stretch (PaulStretch -- pitch preserved)")
+		.stringColor_(Color(0.7, 0.85, 0.95))
+		.font_(Font(size: 14, bold: true));
+
+		StaticText(win, Rect(700, 410, 90, 22)).string_("Factor (x):")
+		.stringColor_(colorSet[1]);
+		stretchBox = NumberBox(win, Rect(795, 410, 90, 22))
+		.background_(colorSet[1]).stringColor_(colorSet[4]).maxDecimals_(3)
+		.minDecimals_(1).step_(0.5).clipLo_(0.01);
+
+		StaticText(win, Rect(895, 410, 100, 22)).string_("Window (s):")
+		.stringColor_(colorSet[1]);
+		stretchWindowBox = NumberBox(win, Rect(995, 410, 90, 22))
+		.background_(colorSet[1]).stringColor_(colorSet[4]).maxDecimals_(3)
+		.minDecimals_(2).step_(0.01).clipLo_(0.01);
+
 		// ---- Action buttons ----
 		// Audition deterministically plays THIS (sample, section) via
 		// #playSectionVoice. Reads the (sample, section) directly from
@@ -691,6 +712,8 @@
 			overrides[\decay]        = decayBox.value.max(0);
 			overrides[\sustainLevel] = sustainBox.value.clip(0, 1);
 			overrides[\release]      = releaseBox.value.max(0);
+			overrides[\stretch]      = stretchBox.value.max(0.01);
+			overrides[\stretchWindow]= stretchWindowBox.value.max(0.01);
 			//Replace wholesale so deselected fields don't linger.
 			this.clearSampleVoiceArgs(smpl, scn);
 			this.setSampleVoiceArgs(smpl, scn, overrides);
@@ -743,7 +766,8 @@
 
 		[loopOnMenu, loopDirMenu, loopModeMenu, relModeMenu,
 			loopXfadeBox, relXfadeBox,
-			attackBox, decayBox, sustainBox, releaseBox].do{|v|
+			attackBox, decayBox, sustainBox, releaseBox,
+			stretchBox, stretchWindowBox].do{|v|
 			v.action_({ writeOverride.value });
 		};
 
@@ -822,6 +846,9 @@
 			decayBox.value_(overrides[\decay] ? 0.0);
 			sustainBox.value_(overrides[\sustainLevel] ? 1.0);
 			releaseBox.value_(overrides[\release] ? 0.05);
+
+			stretchBox.value_(overrides[\stretch] ? 1.0);
+			stretchWindowBox.value_(overrides[\stretchWindow] ? 0.25);
 
 			//Selections in file frames (selection coord space).
 			sfv.setSelection(0, [loopRegion[0] + startSample, loopRegion[1] - loopRegion[0]]);

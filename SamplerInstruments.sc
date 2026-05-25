@@ -262,6 +262,158 @@
 				var env = EnvGen.kr(envCtl, gate, doneAction: 2);
 				Out.ar(out, Balance2.ar(sigL * env * amp, sigR * env * amp, pan));
 			}).add;
+
+
+			// PaulStretch-style per-section time stretch (mono).
+			//
+			// Pitch-preserving extreme time stretch in the spirit of Paul
+			// Nasca's PaulStretch. Two stages:
+			//   1. Warp1 traverses the section slowly. The read pointer sweeps
+			//      across the buffer at a speed of one buffer-length per `dur`
+			//      seconds (the caller bakes the stretch factor into `dur`).
+			//      With loop == 0 the pointer is a one-shot Line start -> end;
+			//      with loop == 1 it is a Phasor that wraps inside the
+			//      [loopStart, loopEnd] region (loopDir: 0 fwd, 1 rev, 2 palin),
+			//      so loop points work at any stretch amount. Grains play at
+			//      freqScale = rate, so pitch is owned by `rate` (rate = 1 ->
+			//      original pitch) and is *independent* of the stretch amount --
+			//      stretching never changes pitch.
+			//   2. FFT -> PV_Diffuser -> IFFT randomizes the phase of every bin
+			//      each frame while preserving magnitudes. This is the
+			//      characteristic PaulStretch move: it dissolves the periodic
+			//      grain-rate artifacts Warp1 leaves behind into the smooth,
+			//      smeared spectral wash PaulStretch is known for, and also
+			//      masks the loop seam (no explicit crossfade needed).
+			//
+			// fftSize is a SynthDef-build constant (LocalBuf requires it). The
+			// grain window length and overlap count are exposed as controls.
+			// loopMode / loopXfade and the release region do not apply here.
+			// Lifetime is the gate-driven \env (doneAction:2), same contract as
+			// \ssvoice1: one-shot callers pass a self-terminating linen sized to
+			// the stretched duration; gated/looped callers hold the note open
+			// and drop gate to release.
+			SynthDef(\sspaulstretch1, {arg buf, rate = 1, amp = 1, pan = 0, out = 0,
+				                startPos = 0, dur = 1, gate = 1,
+				                windowSize = 0.25, overlaps = 4,
+				                loop = 0, loopDir = 0, loopStart = 0, loopEnd = 0,
+				                releaseMode = 0, releaseStart = 0, releaseEnd = 0,
+				                releaseXfade = 0.02;
+				var fftSize = 4096;
+				var envCtl = \env.kr(Env.newClear(8).asArray);
+				var bufDur = BufDur.kr(buf);
+				var bufFrames = BufFrames.kr(buf);
+				var start = (startPos / bufDur).clip(0, 1);
+				// Normalized loop bounds (loopEnd <= 0 -> whole buffer).
+				var lEnd = Select.kr(loopEnd > 0, [bufFrames, loopEnd]);
+				var lStartNorm = (loopStart / bufFrames).clip(0, 1);
+				var lEndNorm = (lEnd / bufFrames).clip(0, 1);
+				var lLenNorm = (lEndNorm - lStartNorm).max(0.0001);
+				// Pointer speed in normalized buffer-fraction per sample: the
+				// whole buffer (1.0) is traversed in `dur` seconds, so the
+				// stretch factor baked into `dur` is honored inside the loop
+				// region too.
+				var ptrSpeed = 1 / (dur * SampleRate.ir);
+				var fwd = Phasor.ar(0, ptrSpeed,     lStartNorm, lEndNorm, lStartNorm);
+				var rev = Phasor.ar(0, ptrSpeed.neg, lStartNorm, lEndNorm, lEndNorm);
+				var tri = Phasor.ar(0, ptrSpeed, 0, 2 * lLenNorm);
+				var pal = lStartNorm + (lLenNorm - (tri - lLenNorm).abs);
+				var loopPtr = Select.ar(loopDir, [fwd, rev, pal]);
+				// One-shot: sweep from the start position to the buffer end over
+				// the (already stretched) duration. Held at 1 once it arrives.
+				var onePtr = Line.ar(start, 1, dur);
+				var ptr = Select.ar(loop, [onePtr, loopPtr]);
+				var sustainGrains = Warp1.ar(1, buf, ptr, rate * BufRateScale.kr(buf),
+					windowSize, -1, overlaps, 0.1, 2);
+				// ---- Release region (Ableton-style), normalized-pointer twin
+				// of \ssvoice1. On note-off the pointer crossfades from the
+				// sustain reader to a release-region reader over releaseXfade s.
+				// releaseMode: 0 off, 1 oneShot, 2 loop (fwd), 3 palin.
+				var noteOffTrig = 1 - gate;
+				var rEnd = Select.kr(releaseEnd > 0, [bufFrames, releaseEnd]);
+				var rStartNorm = (releaseStart / bufFrames).clip(0, 1);
+				var rEndNorm = (rEnd / bufFrames).clip(0, 1);
+				var rLenNorm = (rEndNorm - rStartNorm).max(0.0001);
+				var rFwd = Phasor.ar(noteOffTrig, ptrSpeed,     rStartNorm, rEndNorm, rStartNorm);
+				var rTri = Phasor.ar(noteOffTrig, ptrSpeed, 0, 2 * rLenNorm);
+				var rPal = rStartNorm + (rLenNorm - (rTri - rLenNorm).abs);
+				var rOneShotPtr = (rStartNorm + Sweep.ar(noteOffTrig, ptrSpeed * SampleRate.ir)).min(rEndNorm);
+				var releasePtr = Select.ar(releaseMode, [DC.ar(0), rOneShotPtr, rFwd, rPal]);
+				var releaseGrains = Warp1.ar(1, buf, releasePtr, rate * BufRateScale.kr(buf),
+					windowSize, -1, overlaps, 0.1, 2);
+				var releaseActive = releaseMode > 0;
+				var fadeAmt = Lag.kr(noteOffTrig * releaseActive, releaseXfade.max(0));
+				var sustainGain = cos(fadeAmt * (pi/2));
+				var releaseGain = sin(fadeAmt * (pi/2));
+				var grains = (sustainGrains * sustainGain) + (releaseGrains * releaseGain);
+				// Re-randomize bin phases once per FFT frame (frame period =
+				// fftSize * hop samples; hop = 0.5).
+				var frameTrig = Impulse.kr(SampleRate.ir / (fftSize * 0.5));
+				var chain = FFT(LocalBuf(fftSize), grains, 0.5, 0);
+				var sig;
+				chain = PV_Diffuser(chain, frameTrig);
+				sig = IFFT(chain, 0);
+				Out.ar(out, Pan2.ar(sig * EnvGen.kr(envCtl, gate, doneAction: 2) * amp, pan));
+			}).add;
+
+
+			// PaulStretch-style per-section time stretch (stereo).
+			// Mirrors \sspaulstretch1 with an independent Warp1 + FFT chain per
+			// channel (buf0 = L, buf1 = R) and Balance2 positioning. Pointer
+			// timing derives from buf0 (loader allocates L/R as a matched pair).
+			SynthDef(\sspaulstretch2, {arg buf0, buf1, rate = 1, amp = 1, pan = 0, out = 0,
+				                startPos = 0, dur = 1, gate = 1,
+				                windowSize = 0.25, overlaps = 4,
+				                loop = 0, loopDir = 0, loopStart = 0, loopEnd = 0,
+				                releaseMode = 0, releaseStart = 0, releaseEnd = 0,
+				                releaseXfade = 0.02;
+				var fftSize = 4096;
+				var envCtl = \env.kr(Env.newClear(8).asArray);
+				var bufDur = BufDur.kr(buf0);
+				var bufFrames = BufFrames.kr(buf0);
+				var start = (startPos / bufDur).clip(0, 1);
+				var lEnd = Select.kr(loopEnd > 0, [bufFrames, loopEnd]);
+				var lStartNorm = (loopStart / bufFrames).clip(0, 1);
+				var lEndNorm = (lEnd / bufFrames).clip(0, 1);
+				var lLenNorm = (lEndNorm - lStartNorm).max(0.0001);
+				var ptrSpeed = 1 / (dur * SampleRate.ir);
+				var fwd = Phasor.ar(0, ptrSpeed,     lStartNorm, lEndNorm, lStartNorm);
+				var rev = Phasor.ar(0, ptrSpeed.neg, lStartNorm, lEndNorm, lEndNorm);
+				var tri = Phasor.ar(0, ptrSpeed, 0, 2 * lLenNorm);
+				var pal = lStartNorm + (lLenNorm - (tri - lLenNorm).abs);
+				var loopPtr = Select.ar(loopDir, [fwd, rev, pal]);
+				var onePtr = Line.ar(start, 1, dur);
+				var ptr = Select.ar(loop, [onePtr, loopPtr]);
+				// ---- Release region (Ableton-style), shared pointer math.
+				var noteOffTrig = 1 - gate;
+				var rEnd = Select.kr(releaseEnd > 0, [bufFrames, releaseEnd]);
+				var rStartNorm = (releaseStart / bufFrames).clip(0, 1);
+				var rEndNorm = (rEnd / bufFrames).clip(0, 1);
+				var rLenNorm = (rEndNorm - rStartNorm).max(0.0001);
+				var rFwd = Phasor.ar(noteOffTrig, ptrSpeed,     rStartNorm, rEndNorm, rStartNorm);
+				var rTri = Phasor.ar(noteOffTrig, ptrSpeed, 0, 2 * rLenNorm);
+				var rPal = rStartNorm + (rLenNorm - (rTri - rLenNorm).abs);
+				var rOneShotPtr = (rStartNorm + Sweep.ar(noteOffTrig, ptrSpeed * SampleRate.ir)).min(rEndNorm);
+				var releasePtr = Select.ar(releaseMode, [DC.ar(0), rOneShotPtr, rFwd, rPal]);
+				var releaseActive = releaseMode > 0;
+				var fadeAmt = Lag.kr(noteOffTrig * releaseActive, releaseXfade.max(0));
+				var sustainGain = cos(fadeAmt * (pi/2));
+				var releaseGain = sin(fadeAmt * (pi/2));
+				var frameTrig = Impulse.kr(SampleRate.ir / (fftSize * 0.5));
+				var grainsL = (Warp1.ar(1, buf0, ptr, rate * BufRateScale.kr(buf0),
+					windowSize, -1, overlaps, 0.1, 2) * sustainGain)
+					+ (Warp1.ar(1, buf0, releasePtr, rate * BufRateScale.kr(buf0),
+						windowSize, -1, overlaps, 0.1, 2) * releaseGain);
+				var grainsR = (Warp1.ar(1, buf1, ptr, rate * BufRateScale.kr(buf1),
+					windowSize, -1, overlaps, 0.1, 2) * sustainGain)
+					+ (Warp1.ar(1, buf1, releasePtr, rate * BufRateScale.kr(buf1),
+						windowSize, -1, overlaps, 0.1, 2) * releaseGain);
+				var chainL = PV_Diffuser(FFT(LocalBuf(fftSize), grainsL, 0.5, 0), frameTrig);
+				var chainR = PV_Diffuser(FFT(LocalBuf(fftSize), grainsR, 0.5, 0), frameTrig);
+				var sigL = IFFT(chainL, 0);
+				var sigR = IFFT(chainR, 0);
+				var env = EnvGen.kr(envCtl, gate, doneAction: 2);
+				Out.ar(out, Balance2.ar(sigL * env * amp, sigR * env * amp, pan));
+			}).add;
 		})
 	}
 

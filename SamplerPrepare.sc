@@ -89,6 +89,15 @@ SamplerPrepare {
 		var effReleaseEnd   = pick.(\releaseEnd,   args.releaseEnd);
 		var effReleaseXfade = pick.(\releaseXfade, args.releaseXfade);
 		var effAmpenv       = pick.(\ampenv,       nil);
+		var effStretch      = pick.(\stretch,      args.stretch);
+		var effStretchWindow= pick.(\stretchWindow,args.stretchWindow);
+		//PaulStretch path is engaged when a stretch factor != 1 is in effect.
+		//When off, dispatch and envelope are byte-identical to the prior
+		//\ssvoice{1,2} voice path.
+		var stretchActive   = effStretch.notNil and: { effStretch != 1 } and: { effStretch > 0 };
+		//Stretched playback span -- drives both the Warp1 pointer sweep and
+		//the one-shot linen body below.
+		var envSpan = if(stretchActive) { duration * effStretch } { duration };
 
 		var loopDirInt = case
 			{ effLoopDir == \fwd }   { 0 }
@@ -138,7 +147,7 @@ SamplerPrepare {
 					effRelease, 1, \sin).asArray
 			} {
 				Env.linen(effAttack,
-					max(duration - effAttack - effRelease, 0.001),
+					max(envSpan - effAttack - effRelease, 0.001),
 					effRelease, 1, \sine).asArray
 			}
 		};
@@ -164,10 +173,42 @@ SamplerPrepare {
 			\env, voiceEnv
 		];
 
-		synth = if(buffer.size == 2) {
-			Synth(\ssvoice2, [\buf0, buffer[0], \buf1, buffer[1]] ++ common)
+		synth = if(stretchActive) {
+			//PaulStretch path. Honors rate (pitch), amp, pan, out, startPos,
+			//the gate-driven envelope, the loop region (loopStart/loopEnd/
+			//loopDir), and the Ableton-style release region (releaseMode/
+			//releaseStart/releaseEnd/releaseXfade). loopMode/loopXfade do not
+			//apply (the FFT phase smear masks the loop seam on its own).
+			var psCommon = [
+				\rate, this.rate,
+				\amp, args.amp,
+				\pan, args.pan,
+				\out, args.out,
+				\startPos, this.position,
+				\dur, envSpan,
+				\gate, args.gate,
+				\windowSize, effStretchWindow ? 0.25,
+				\loop, effLoop,
+				\loopDir, loopDirInt,
+				\loopStart, effLoopStart ? 0,
+				\loopEnd, effLoopEnd ? 0,
+				\releaseMode, releaseModeInt,
+				\releaseStart, effReleaseStart ? 0,
+				\releaseEnd, effReleaseEnd ? 0,
+				\releaseXfade, effReleaseXfade ? 0,
+				\env, voiceEnv
+			];
+			if(buffer.size == 2) {
+				Synth(\sspaulstretch2, [\buf0, buffer[0], \buf1, buffer[1]] ++ psCommon)
+			} {
+				Synth(\sspaulstretch1, [\buf, buffer[0]] ++ psCommon)
+			};
 		} {
-			Synth(\ssvoice1, [\buf, buffer[0]] ++ common)
+			if(buffer.size == 2) {
+				Synth(\ssvoice2, [\buf0, buffer[0], \buf1, buffer[1]] ++ common)
+			} {
+				Synth(\ssvoice1, [\buf, buffer[0]] ++ common)
+			};
 		};
 		synth.onFree({
 			SamplerQuery.playing[this.midiChannel].removeAt(synthID);
